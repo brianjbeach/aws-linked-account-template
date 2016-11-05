@@ -1,0 +1,144 @@
+{
+	"AWSTemplateFormatVersion" : "2010-09-09",
+	"Description" : "Create a User and Group",
+	
+	"Parameters" : {
+		"PayerAccountID" : {
+			"Description" : "Account ID of the payer account. Users in the payer account can assume the oversight role in this account. They will have full control over this account.",
+			"Type" : "String",
+			"Default": "123456789012",
+			"ConstraintDescription" : "Must be a valid AWS Account ID without hyphens.",
+			"AllowedPattern": "\\d{12}",
+			"MinLength": "12",
+			"MaxLength": "12"
+		},
+
+		"CloudTrailBucketName" : {
+			"Description" : "Name of the bucket to store Cloud Trail log files in. Best practice is to log to a bucket in another account.",
+			"Type" : "String",
+			"Default": "audit-bucket",
+			"ConstraintDescription" : "Must be a valid AWS bucket."
+		}
+	},
+	
+	"Resources" : {
+
+		"ChangeYourPassword" : {
+			"Type" : "AWS::IAM::ManagedPolicy",
+			"Properties" : {
+				"Description" : "This policy grants access to the ChangePassword action, which lets users change only their own passwords from the console, the AWS CLI, Tools for Windows PowerShell, or the API. It also grants access to the GetAccountPasswordPolicy action, which lets the user view the current password policy; this permission is required so that the user can display the Change Password page in the console. The user must be able to read the current password policy to ensure the changed password meets the requirements of the policy.",
+				"Path" : "/AccountConfig/",
+				"PolicyDocument" :   {
+					"Version": "2012-10-17",
+					"Statement": [
+						{
+						"Effect": "Allow",
+						"Action": "iam:GetAccountPasswordPolicy",
+						"Resource": "*"
+					},
+					{
+						"Effect": "Allow",
+						"Action": "iam:ChangePassword",		
+						"Resource" : {"Fn::Join": ["", ["arn:aws:iam::", { "Ref" : "AWS::AccountId" } , ":user/${aws:username}"]]}
+						}
+					]
+				}
+			}
+		},
+		
+		"DefaultInstanceRole": {
+			"Type": "AWS::IAM::Role",
+			"Properties": {
+				"Path": "/AccountConfig/",
+				"RoleName": "DefaultInstanceRole",
+				"AssumeRolePolicyDocument": {
+					"Version" : "2012-10-17",
+					"Statement": [ {
+						"Effect": "Allow",
+						"Principal": {
+							"Service": [ "ec2.amazonaws.com" ]
+						},
+						"Action": [ "sts:AssumeRole" ]
+					} ]
+				},
+				"ManagedPolicyArns": [ "arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess" ]
+			}
+		},
+	  
+		"DefaultInstanceProfile": {
+			"Type": "AWS::IAM::InstanceProfile",
+			"Properties": {
+				"Path": "/AccountConfig/",
+				"Roles": [ {
+					"Ref": "DefaultInstanceRole"
+				} ]
+			}
+		},
+		
+		"CrossAccountOversightRole": {
+			"Type": "AWS::IAM::Role",
+			"Properties": {
+				"Path": "/AccountConfig/",
+				"RoleName": "CrossAccountOversight",
+				"AssumeRolePolicyDocument": {
+					"Version": "2012-10-17",
+					"Statement": [
+						{
+							"Effect": "Allow",
+							"Principal": {
+								"Service": "ds.amazonaws.com"
+							},
+							"Action": ["sts:AssumeRole"],
+							"Condition": {
+								"StringEquals": {
+									"sts:externalid": {"Ref": "PayerAccountID"}
+								}
+							}
+						}
+					]
+				},
+				"ManagedPolicyArns": [ "arn:aws:iam::aws:policy/AdministratorAccess" ]
+			}
+		},
+
+		"SystemAdmininstratorsGroup": {
+			"Type": "AWS::IAM::Group",
+			"Properties": {
+				"Path": "/AccountConfig/",
+				"GroupName": "SystemAdmininstrators",
+				"ManagedPolicyArns": [
+					"arn:aws:iam::aws:policy/AmazonEC2FullAccess", 
+					"arn:aws:iam::aws:policy/AmazonS3FullAccess",
+					"arn:aws:iam::aws:policy/AmazonRDSFullAccess",
+					"arn:aws:iam::aws:policy/AmazonRoute53FullAccess",
+					"arn:aws:iam::aws:policy/ReadOnlyAccess",
+					{"Ref": "ChangeYourPassword"}
+				]
+			}
+		},
+
+		"SecurityAdmininstratorsGroup": {
+			"Type": "AWS::IAM::Group",
+			"Properties": {
+				"Path": "/AccountConfig/",
+				"GroupName": "SecurityAdmininstrators",
+				"ManagedPolicyArns": [
+					"arn:aws:iam::aws:policy/IAMFullAccess",
+					"arn:aws:iam::aws:policy/ReadOnlyAccess",
+					{"Ref": "ChangeYourPassword"}
+				]
+			}
+		},
+		
+		"AuditTrail" : {
+			"Type" : "AWS::CloudTrail::Trail",
+			"Properties" : {
+				"S3BucketName" : {"Ref":"CloudTrailBucketName"},
+				"IsLogging" : true,
+				"IncludeGlobalServiceEvents" : true,
+				"IsMultiRegionTrail" : true
+			}
+		}
+
+	}
+}
